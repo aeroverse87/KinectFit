@@ -6,6 +6,7 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useUser } from "@/contexts/UserContext";
 import { getHistoryRange, getMealLogs } from "@/lib/firebase/firestore";
+import NutritionChart from "@/components/NutritionChart";
 import type { DailySummary, MealLog } from "@/types";
 
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -271,6 +272,22 @@ export default function HistoryPage() {
           <span className="text-[10px] text-on-surface-variant">Has Logs</span>
         </div>
       </div>
+
+      {/* Nutrition Progress Chart */}
+      <motion.div
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.15 }}
+        className="mb-6"
+      >
+        <NutritionChart
+          summaries={summaries}
+          year={year}
+          month={month}
+          calorieTarget={calorieTarget}
+          proteinTarget={proteinTarget}
+        />
+      </motion.div>
 
       {/* Selected Day Detail */}
       {selectedDate && (
