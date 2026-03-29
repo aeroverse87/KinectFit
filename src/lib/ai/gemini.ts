@@ -1,5 +1,6 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { getAiUsage, incrementAiUsage } from "@/lib/firebase/firestore";
+import { getToday } from "@/lib/utils/date";
 
 const genAI = new GoogleGenerativeAI(
   process.env.NEXT_PUBLIC_GEMINI_API_KEY || ""
@@ -7,9 +8,7 @@ const genAI = new GoogleGenerativeAI(
 
 export const geminiModel = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
-function getToday(): string {
-  return new Date().toISOString().split("T")[0];
-}
+
 
 export class AiLimitReachedError extends Error {
   constructor() {

@@ -13,9 +13,7 @@ import { generateContent, getRemainingAiCalls, AiLimitReachedError } from "@/lib
 import { buildMealPlanPrompt } from "@/lib/ai/prompts";
 import type { FoodItem, Meal } from "@/types";
 
-function getToday(): string {
-  return new Date().toISOString().split("T")[0];
-}
+import { getToday } from "@/lib/utils/date";
 
 export default function FoodSelectionPage() {
   const router = useRouter();

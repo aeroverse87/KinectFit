@@ -11,9 +11,7 @@ import { useUser } from "@/contexts/UserContext";
 import { getFoodItems, addMealLog, getMealLogs } from "@/lib/firebase/firestore";
 import type { FoodItem, MealFood, MealLog } from "@/types";
 
-function getToday(): string {
-  return new Date().toISOString().split("T")[0];
-}
+import { getToday } from "@/lib/utils/date";
 
 export default function LogPage() {
   const router = useRouter();

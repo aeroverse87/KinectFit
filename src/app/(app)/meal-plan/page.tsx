@@ -12,9 +12,7 @@ import { useUser } from "@/contexts/UserContext";
 import { getDailyPlan, getMealLogs, saveDailyPlan, addMealLog, getFoodItems } from "@/lib/firebase/firestore";
 import type { DailyPlan, MealLog, MealFood, FoodItem } from "@/types";
 
-function getToday(): string {
-  return new Date().toISOString().split("T")[0];
-}
+import { getToday } from "@/lib/utils/date";
 
 export default function MealPlanPage() {
   const router = useRouter();
