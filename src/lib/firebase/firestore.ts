@@ -14,7 +14,7 @@ import {
   DocumentData,
 } from "firebase/firestore";
 import { db } from "./config";
-import type { UserProfile, FoodItem, DailyPlan, MealLog, DailySummary } from "@/types";
+import type { UserProfile, FoodItem, DailyPlan, MealLog, DailySummary, WeightEntry } from "@/types";
 
 // ---- User Profile ----
 export const getUserProfile = async (userId: string): Promise<UserProfile | null> => {
@@ -101,6 +101,21 @@ export const getHistoryRange = async (
   return snap.docs.map((d) => ({ id: d.id, ...d.data() } as DailySummary));
 };
 
+// ---- Weight Entries ----
+export const addWeightEntry = async (userId: string, weight: number, date: string) =>
+  addDoc(collection(db, "users", userId, "weightEntries"), {
+    weight,
+    date,
+    timestamp: Timestamp.now(),
+  });
+
+export const getWeightEntries = async (userId: string, limit = 30): Promise<WeightEntry[]> => {
+  if (!db) return [];
+  const snap = await getDocs(
+    query(collection(db, "users", userId, "weightEntries"), orderBy("date", "desc"))
+  );
+  return snap.docs.slice(0, limit).map((d) => ({ id: d.id, ...d.data() } as WeightEntry)).reverse();
+};
 // ---- AI Usage Tracking ----
 const AI_DAILY_LIMIT = 5;
 

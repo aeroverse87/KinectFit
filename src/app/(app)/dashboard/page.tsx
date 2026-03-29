@@ -2,10 +2,11 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
-import { Bell, User } from "lucide-react";
+import { User } from "lucide-react";
 import { useRouter } from "next/navigation";
 import ProgressRing from "@/components/ProgressRing";
 import CoachInsight from "@/components/CoachInsight";
+import NotificationBell from "@/components/NotificationBell";
 import { useAuth } from "@/contexts/AuthContext";
 import { useUser } from "@/contexts/UserContext";
 import { getDailyPlan, getMealLogs } from "@/lib/firebase/firestore";
@@ -20,6 +21,7 @@ export default function DashboardPage() {
   const [plan, setPlan] = useState<DailyPlan | null>(null);
   const [logs, setLogs] = useState<MealLog[]>([]);
   const [loading, setLoading] = useState(true);
+  const [streak, setStreak] = useState(0);
 
   const loadData = useCallback(async () => {
     if (!user) return;
@@ -56,8 +58,28 @@ export default function DashboardPage() {
 
   const nextMeal = plan?.meals?.find((m) => !m.completed);
 
-  // Demo streak (would come from history in production)
-  const streak = 12;
+  // Calculate streak: count consecutive days (going backwards) with at least 1 meal log
+  useEffect(() => {
+    if (!user) return;
+    const calcStreak = async () => {
+      let count = 0;
+      const d = new Date();
+      d.setDate(d.getDate() - 1); // start from yesterday
+      for (let i = 0; i < 60; i++) {
+        const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+        try {
+          const dayLogs = await getMealLogs(user.uid, dateStr);
+          if (dayLogs.length > 0) count++;
+          else break;
+        } catch { break; }
+        d.setDate(d.getDate() - 1);
+      }
+      // If today also has logs, add it
+      if (logs.length > 0) count++;
+      setStreak(count);
+    };
+    calcStreak();
+  }, [user, logs.length]);
 
   if (loading) {
     return (
@@ -79,9 +101,7 @@ export default function DashboardPage() {
           Ethereal Coach
         </h1>
         <div className="flex items-center gap-3">
-          <button className="w-9 h-9 rounded-full bg-surface-container flex items-center justify-center">
-            <Bell size={16} className="text-on-surface-variant" />
-          </button>
+          <NotificationBell plan={plan} logs={logs} profile={profile} />
           <button
             onClick={() => router.push("/profile")}
             className="w-9 h-9 rounded-full bg-surface-container flex items-center justify-center"
@@ -91,27 +111,54 @@ export default function DashboardPage() {
         </div>
       </motion.div>
 
-      {/* Progress Ring Section */}
+      {/* Progress Rings Section */}
       <motion.div
         initial={{ opacity: 0, scale: 0.9 }}
         animate={{ opacity: 1, scale: 1 }}
         transition={{ delay: 0.1 }}
-        className="bg-surface-container-low rounded-3xl p-6 flex flex-col items-center mb-6"
+        className="bg-surface-container-low rounded-3xl p-6 mb-6"
       >
-        <ProgressRing
-          value={consumed}
-          max={calorieTarget}
-          size={220}
-          strokeWidth={16}
-          sublabel="KCAL LEFT TO GO"
-        />
+        <div className="flex items-center justify-center gap-6">
+          {/* Calorie Ring */}
+          <div className="flex flex-col items-center">
+            <ProgressRing
+              value={consumed}
+              max={calorieTarget}
+              size={150}
+              strokeWidth={12}
+              sublabel="KCAL"
+            />
+            <p className="text-[10px] font-bold tracking-widest text-on-surface-variant mt-2">CALORIES</p>
+          </div>
 
-        {/* Secondary ring for protein */}
-        <div className="mt-2 flex items-center gap-2">
-          <div className="w-3 h-3 rounded-full bg-primary" />
-          <span className="text-xs text-on-surface-variant">Calories</span>
-          <div className="w-3 h-3 rounded-full bg-secondary ml-2" />
-          <span className="text-xs text-on-surface-variant">Protein</span>
+          {/* Protein Ring */}
+          <div className="flex flex-col items-center">
+            <ProgressRing
+              value={proteinConsumed}
+              max={proteinTarget}
+              size={150}
+              strokeWidth={12}
+              color="#c57eff"
+              sublabel="GRAMS"
+            />
+            <p className="text-[10px] font-bold tracking-widest text-on-surface-variant mt-2">PROTEIN</p>
+          </div>
+        </div>
+
+        {/* Macro Summary Pills */}
+        <div className="flex justify-center gap-3 mt-4">
+          <div className="px-3 py-1.5 rounded-full bg-surface-container flex items-center gap-1.5">
+            <div className="w-2 h-2 rounded-full bg-primary" />
+            <span className="text-[10px] font-semibold text-on-surface-variant">
+              {remaining} kcal left
+            </span>
+          </div>
+          <div className="px-3 py-1.5 rounded-full bg-surface-container flex items-center gap-1.5">
+            <div className="w-2 h-2 rounded-full" style={{ background: "#c57eff" }} />
+            <span className="text-[10px] font-semibold text-on-surface-variant">
+              {Math.max(0, proteinTarget - proteinConsumed)}g left
+            </span>
+          </div>
         </div>
       </motion.div>
 
@@ -157,20 +204,42 @@ export default function DashboardPage() {
             onClick={() => router.push("/meal-plan")}
             className="w-full rounded-2xl bg-surface-container-low overflow-hidden text-left"
           >
-            <div className="relative h-40 bg-gradient-to-b from-surface-container to-surface-container-low flex items-center justify-center">
-              <span className="text-6xl">🥗</span>
-              <div className="absolute top-3 right-3 w-8 h-8 rounded-full bg-primary flex items-center justify-center">
-                <span className="text-surface text-lg">+</span>
+            {/* Meal Type Header */}
+            <div className="px-4 pt-4 pb-2 flex items-center gap-2">
+              <span className="text-xl">
+                {nextMeal.type === "breakfast" ? "🌅" : nextMeal.type === "lunch" ? "☀️" : nextMeal.type === "dinner" ? "🌙" : nextMeal.type === "pre_workout" ? "⚡" : nextMeal.type === "post_workout" ? "💪" : "🌤️"}
+              </span>
+              <div>
+                <p className="text-base font-display font-bold text-on-surface capitalize">
+                  {nextMeal.type.replace("_", " ")}
+                </p>
+                <p className="text-[10px] text-on-surface-variant font-medium tracking-wider uppercase">
+                  {nextMeal.time} • {nextMeal.totalCalories} kcal
+                </p>
               </div>
             </div>
-            <div className="p-4">
-              <p className="text-lg font-semibold text-on-surface">
-                {nextMeal.foods[0]?.name || "Your next meal"}
-              </p>
-              <div className="flex gap-4 mt-1">
-                <span className="text-xs text-primary">● {nextMeal.totalProtein}g Protein</span>
-                <span className="text-xs text-secondary">● {nextMeal.totalCalories} kcal</span>
+
+            {/* Food Items List */}
+            <div className="px-4 pb-3 space-y-1.5">
+              {nextMeal.foods.map((food, i) => (
+                <div key={i} className="flex items-center justify-between py-1.5 px-3 rounded-lg bg-surface-container/50">
+                  <span className="text-xs text-on-surface font-medium truncate flex-1">
+                    {food.name}
+                  </span>
+                  <span className="text-[10px] text-on-surface-variant ml-2 shrink-0">
+                    {food.quantity} {food.unit} • {food.calories} kcal
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            {/* Footer */}
+            <div className="px-4 pb-4 flex items-center justify-between">
+              <div className="flex gap-3">
+                <span className="text-[10px] text-primary font-semibold">● {nextMeal.totalProtein}g Protein</span>
+                <span className="text-[10px] font-semibold" style={{ color: "#c57eff" }}>● {nextMeal.totalCalories} kcal</span>
               </div>
+              <span className="text-xs text-primary font-semibold">Log →</span>
             </div>
           </button>
         ) : (

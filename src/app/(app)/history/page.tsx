@@ -4,8 +4,9 @@ import { useState, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
-import { getHistoryRange } from "@/lib/firebase/firestore";
-import type { DailySummary } from "@/types";
+import { useUser } from "@/contexts/UserContext";
+import { getHistoryRange, getMealLogs } from "@/lib/firebase/firestore";
+import type { DailySummary, MealLog } from "@/types";
 
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = [
@@ -25,14 +26,50 @@ function formatDate(year: number, month: number, day: number) {
   return `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
+// Derive a summary from meal logs when no explicit dailySummary exists
+function deriveSummaryFromLogs(
+  date: string,
+  logs: MealLog[],
+  calorieTarget: number,
+  proteinTarget: number
+): DailySummary {
+  const totalCalories = logs.reduce((s, l) => s + l.totalCalories, 0);
+  const totalProtein = logs.reduce((s, l) => s + l.totalProtein, 0);
+  const calPct = totalCalories / calorieTarget;
+  const proPct = totalProtein / proteinTarget;
+  const avg = (calPct + proPct) / 2;
+
+  let status: "goal_met" | "partial" | "missed" = "missed";
+  if (avg >= 0.85) status = "goal_met";
+  else if (avg >= 0.5) status = "partial";
+
+  return {
+    date,
+    totalCalories,
+    totalProtein,
+    totalFats: 0,
+    totalCarbs: 0,
+    targetCalories: calorieTarget,
+    targetProtein: proteinTarget,
+    status,
+    meals: logs,
+  };
+}
+
 export default function HistoryPage() {
   const { user } = useAuth();
+  const { profile } = useUser();
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth());
   const [summaries, setSummaries] = useState<Map<string, DailySummary>>(new Map());
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const [selectedDetail, setSelectedDetail] = useState<DailySummary | null>(null);
   const [loading, setLoading] = useState(true);
+  const [detailLoading, setDetailLoading] = useState(false);
+
+  const calorieTarget = profile?.calorieTarget || 2000;
+  const proteinTarget = profile?.proteinTarget || 150;
 
   const loadHistory = useCallback(async () => {
     if (!user) return;
@@ -43,17 +80,68 @@ export default function HistoryPage() {
       const data = await getHistoryRange(user.uid, startDate, endDate);
       const map = new Map<string, DailySummary>();
       data.forEach((s) => map.set(s.date, s));
+
+      // Also check mealLogs for each day in the month to find days with logs but no summary
+      const daysInMonth = getDaysInMonth(year, month);
+      for (let d = 1; d <= daysInMonth; d++) {
+        const date = formatDate(year, month, d);
+        if (!map.has(date) && date <= formatDate(now.getFullYear(), now.getMonth(), now.getDate())) {
+          try {
+            const logs = await getMealLogs(user.uid, date);
+            if (logs.length > 0) {
+              map.set(date, deriveSummaryFromLogs(date, logs, calorieTarget, proteinTarget));
+            }
+          } catch {
+            // Silently skip dates that fail
+          }
+        }
+      }
+
       setSummaries(map);
     } catch (e) {
       console.error("Error loading history:", e);
     } finally {
       setLoading(false);
     }
-  }, [user, year, month]);
+  }, [user, year, month, calorieTarget, proteinTarget]);
 
   useEffect(() => {
     loadHistory();
   }, [loadHistory]);
+
+  // Load detail for selected date
+  const handleSelectDate = async (date: string) => {
+    if (date === selectedDate) {
+      setSelectedDate(null);
+      setSelectedDetail(null);
+      return;
+    }
+    setSelectedDate(date);
+
+    // Check if we already have a summary
+    const existing = summaries.get(date);
+    if (existing) {
+      setSelectedDetail(existing);
+      return;
+    }
+
+    // Try to load from mealLogs directly
+    if (!user) return;
+    setDetailLoading(true);
+    try {
+      const logs = await getMealLogs(user.uid, date);
+      if (logs.length > 0) {
+        const derived = deriveSummaryFromLogs(date, logs, calorieTarget, proteinTarget);
+        setSelectedDetail(derived);
+      } else {
+        setSelectedDetail(null);
+      }
+    } catch {
+      setSelectedDetail(null);
+    } finally {
+      setDetailLoading(false);
+    }
+  };
 
   const prevMonth = () => {
     if (month === 0) {
@@ -76,8 +164,7 @@ export default function HistoryPage() {
   const getStatusColor = (date: string) => {
     const summary = summaries.get(date);
     if (!summary) {
-      // If the date is in the past, it's missed
-      if (date < today) return "bg-error/20 text-error";
+      if (date < today) return "";
       return "";
     }
     if (summary.status === "goal_met") return "bg-primary/20 text-primary";
@@ -88,15 +175,13 @@ export default function HistoryPage() {
   const getStatusIcon = (date: string) => {
     const summary = summaries.get(date);
     if (!summary) {
-      if (date < today) return "❌";
+      if (date < today) return "—";
       return "";
     }
     if (summary.status === "goal_met") return "✅";
     if (summary.status === "partial") return "⚠️";
     return "❌";
   };
-
-  const selected = selectedDate ? summaries.get(selectedDate) : null;
 
   return (
     <div className="px-5 pt-4 pb-6 max-w-md mx-auto">
@@ -149,18 +234,22 @@ export default function HistoryPage() {
             const isToday = date === today;
             const isSelected = date === selectedDate;
             const statusColor = getStatusColor(date);
+            const hasSummary = summaries.has(date);
 
             return (
               <button
                 key={day}
-                onClick={() => setSelectedDate(isSelected ? null : date)}
+                onClick={() => handleSelectDate(date)}
                 className={`
-                  aspect-square rounded-xl flex items-center justify-center text-xs font-semibold no-select transition-all
+                  aspect-square rounded-xl flex items-center justify-center text-xs font-semibold no-select transition-all relative
                   ${isToday ? "ring-1 ring-primary" : ""}
                   ${isSelected ? "bg-primary text-surface" : statusColor || "text-on-surface-variant hover:bg-surface-container"}
                 `}
               >
                 {day}
+                {hasSummary && !isSelected && (
+                  <div className="absolute bottom-0.5 w-1 h-1 rounded-full bg-primary" />
+                )}
               </button>
             );
           })}
@@ -178,8 +267,8 @@ export default function HistoryPage() {
           <span className="text-[10px] text-on-surface-variant">Partial</span>
         </div>
         <div className="flex items-center gap-1.5">
-          <div className="w-3 h-3 rounded-full bg-error/20" />
-          <span className="text-[10px] text-on-surface-variant">Missed</span>
+          <div className="w-1 h-1 rounded-full bg-primary" />
+          <span className="text-[10px] text-on-surface-variant">Has Logs</span>
         </div>
       </div>
 
@@ -201,45 +290,68 @@ export default function HistoryPage() {
             <span className="text-lg">{getStatusIcon(selectedDate)}</span>
           </div>
 
-          {selected ? (
+          {detailLoading ? (
+            <div className="flex justify-center py-4">
+              <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+            </div>
+          ) : selectedDetail ? (
             <div className="space-y-3">
               <div className="flex justify-between">
                 <span className="text-xs text-on-surface-variant">Calories</span>
                 <span className="text-xs font-semibold text-on-surface">
-                  {selected.totalCalories} / {selected.targetCalories} kcal
+                  {selectedDetail.totalCalories} / {selectedDetail.targetCalories} kcal
                 </span>
               </div>
               <div className="h-1.5 rounded-full bg-surface-container-highest overflow-hidden">
                 <div
                   className="h-full rounded-full bg-primary transition-all"
                   style={{
-                    width: `${Math.min((selected.totalCalories / selected.targetCalories) * 100, 100)}%`,
+                    width: `${Math.min((selectedDetail.totalCalories / selectedDetail.targetCalories) * 100, 100)}%`,
                   }}
                 />
               </div>
               <div className="flex justify-between">
                 <span className="text-xs text-on-surface-variant">Protein</span>
                 <span className="text-xs font-semibold text-on-surface">
-                  {selected.totalProtein} / {selected.targetProtein}g
+                  {selectedDetail.totalProtein} / {selectedDetail.targetProtein}g
                 </span>
               </div>
               <div className="h-1.5 rounded-full bg-surface-container-highest overflow-hidden">
                 <div
-                  className="h-full rounded-full bg-secondary transition-all"
+                  className="h-full rounded-full transition-all"
                   style={{
-                    width: `${Math.min((selected.totalProtein / selected.targetProtein) * 100, 100)}%`,
+                    background: "#c57eff",
+                    width: `${Math.min((selectedDetail.totalProtein / selectedDetail.targetProtein) * 100, 100)}%`,
                   }}
                 />
               </div>
-              {selected.aiSummary && (
+
+              {/* Meals breakdown */}
+              {selectedDetail.meals && selectedDetail.meals.length > 0 && (
+                <div className="mt-3 pt-3 border-t border-surface-container-highest">
+                  <p className="label-editorial mb-2">LOGGED MEALS</p>
+                  {selectedDetail.meals.map((log, i) => (
+                    <div key={i} className="flex justify-between py-1.5">
+                      <span className="text-xs text-on-surface capitalize">
+                        {log.mealType.replace("_", " ")}
+                      </span>
+                      <span className="text-xs text-on-surface-variant">
+                        {log.totalCalories} kcal • {log.totalProtein}g P
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {selectedDetail.aiSummary && (
                 <p className="text-xs text-on-surface-variant leading-relaxed mt-2 italic">
-                  {selected.aiSummary}
+                  {selectedDetail.aiSummary}
                 </p>
               )}
             </div>
           ) : (
             <p className="text-xs text-on-surface-variant">
-              {selectedDate < today ? "No data logged for this day." : "Upcoming day."}
+              {selectedDate < today ? "No meals logged for this day." : "Upcoming day."}
             </p>
           )}
         </motion.div>

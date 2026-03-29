@@ -5,11 +5,19 @@ export interface UserProfile {
   age: number;
   height: number;
   weight: number;
+  targetWeight?: number;
   goal: "fat_loss" | "maintenance" | "muscle_gain";
   calorieTarget: number;
   proteinTarget: number;
   onboarded: boolean;
   createdAt?: unknown;
+}
+
+export interface WeightEntry {
+  id?: string;
+  weight: number;
+  date: string;
+  timestamp?: unknown;
 }
 
 export interface FoodItem {
